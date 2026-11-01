@@ -930,6 +930,7 @@ const (
 	xTCPFingerprint = "X-Tcp-Fingerprint"
 	xTCPTTL         = "X-Tcp-Ttl"
 	xJA4            = "X-Tls-Ja4"
+	xTLSFP          = "X-Tls-Tlsfp"
 )
 
 type fingerprintKey struct{}
@@ -950,6 +951,11 @@ func fingerprintHeaders(h http.Handler, config *static.Fingerprint) http.Handler
 		req.Header.Del(xJA4)
 		if fingerprint != nil && fingerprint.JA4 != "" {
 			req.Header.Set(xJA4, fingerprint.JA4)
+		}
+
+		req.Header.Del(xTLSFP)
+		if fingerprint != nil && fingerprint.TLSFP != "" {
+			req.Header.Set(xTLSFP, fingerprint.TLSFP)
 		}
 
 		h.ServeHTTP(rw, req)

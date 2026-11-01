@@ -20,12 +20,14 @@ func TestFingerprint_SetClientHello(t *testing.T) {
 		SignatureSchemes:  []tls.SignatureScheme{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601},
 		SupportedProtos:   []string{"h2", "http/1.1"},
 		SupportedVersions: []uint16{0x7a7a, tls.VersionTLS13, tls.VersionTLS12},
+		SupportedCurves:   []tls.CurveID{0x4a4a, 0x001d, 0x0017, 0x001e, 0x0019, 0x0018},
 	}
 
 	var fingerprint Fingerprint
 	fingerprint.SetClientHello(hello)
 
 	assert.Equal(t, "t13d1516h2_8daaf6152771_e5627efa2ab1", fingerprint.JA4)
+	assert.Equal(t, "t13d1513h2_8daaf6152771_8b8af37844ec_0a47a2b05960", fingerprint.TLSFP)
 }
 
 func TestFingerprint_SetSYN(t *testing.T) {
