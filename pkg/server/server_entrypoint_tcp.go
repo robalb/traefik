@@ -172,6 +172,7 @@ type TCPEntryPoint struct {
 	listener               net.Listener
 	switcher               *tcp.HandlerSwitcher
 	transportConfiguration *static.EntryPointsTransport
+	fingerprintConfig      *static.Fingerprint
 	tracker                *connectionTracker
 	httpServer             *httpServer
 	httpsServer            *httpServer
@@ -226,6 +227,7 @@ func NewTCPEntryPoint(ctx context.Context, name string, config *static.EntryPoin
 		listener:               listener,
 		switcher:               tcpSwitcher,
 		transportConfiguration: config.Transport,
+		fingerprintConfig:      config.Fingerprint,
 		tracker:                tracker,
 		httpServer:             httpServer,
 		httpsServer:            httpsServer,
@@ -307,7 +309,19 @@ func (e *TCPEntryPoint) Start(ctx context.Context) {
 				}
 			}
 
-			e.switcher.ServeTCP(newTrackedConnection(writeCloser, e.tracker))
+			trackedConn := newTrackedConnection(writeCloser, e.tracker)
+			if e.fingerprintConfig != nil {
+				trackedConn.fingerprint = &tcp.Fingerprint{}
+				if e.fingerprintConfig.TCP {
+					syn, err := readSavedSYN(conn)
+					if err != nil {
+						logger.Debug().Err(err).Msg("Error while reading saved SYN")
+					}
+					trackedConn.fingerprint.SetSYN(syn)
+				}
+			}
+
+			e.switcher.ServeTCP(trackedConn)
 		})
 	}
 }
@@ -435,6 +449,24 @@ func writeCloser(conn net.Conn) (tcp.WriteCloser, error) {
 	}
 }
 
+func readSavedSYN(conn net.Conn) ([]byte, error) {
+	switch typedConn := conn.(type) {
+	case *proxyproto.Conn:
+		if typedConn.ProxyHeader() != nil {
+			return nil, nil
+		}
+		underlying, ok := typedConn.TCPConn()
+		if !ok {
+			return nil, errors.New("underlying connection is not a tcp connection")
+		}
+		return savedSYN(underlying)
+	case *net.TCPConn:
+		return savedSYN(typedConn)
+	default:
+		return nil, fmt.Errorf("unknown connection type %T", typedConn)
+	}
+}
+
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
 // connections.
 type tcpKeepAliveListener struct {
@@ -533,6 +565,12 @@ func buildListener(ctx context.Context, name string, config *static.EntryPoint) 
 		listener, err = listenConfig.Listen(ctx, "tcp", config.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("error opening listener: %w", err)
+		}
+	}
+
+	if config.Fingerprint != nil && config.Fingerprint.TCP {
+		if err := enableSavedSYN(listener); err != nil {
+			return nil, fmt.Errorf("enabling TCP fingerprinting: %w", err)
 		}
 	}
 
@@ -725,6 +763,10 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 		return nil, fmt.Errorf("invalid aliasHeadersStrategy value %q", configuration.HTTP.AliasHeadersStrategy)
 	}
 
+	if configuration.Fingerprint != nil {
+		handler = fingerprintHeaders(handler, configuration.Fingerprint)
+	}
+
 	// An opaque URL has to be rejected before any handler deriving the path or the request URI from it,
 	// hence the wrapping has to be done last so that it is the first handler executed.
 	handler = denyOpaque(handler)
@@ -748,6 +790,24 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 
 		return ctx
 	})
+
+	if configuration.Fingerprint != nil {
+		connContext.AddConnContextFunc(func(ctx context.Context, c net.Conn) context.Context {
+			if tlsConn, ok := c.(*tls.Conn); ok {
+				if tlsConnWithOptionsName, ok := tlsConn.NetConn().(tcp.TLSConn); ok {
+					c = tlsConnWithOptionsName.WriteCloser
+				}
+			}
+
+			if conn, ok := c.(tcp.FingerprintConn); ok {
+				if fingerprint := conn.Fingerprint(); fingerprint != nil {
+					return context.WithValue(ctx, fingerprintKey{}, fingerprint)
+				}
+			}
+
+			return ctx
+		})
+	}
 
 	if debugConnection || (configuration.Transport != nil && (configuration.Transport.KeepAliveMaxTime > 0 || configuration.Transport.KeepAliveMaxRequests > 0)) {
 		connContext.AddConnContextFunc(func(ctx context.Context, c net.Conn) context.Context {
@@ -820,7 +880,12 @@ func newTrackedConnection(conn tcp.WriteCloser, tracker *connectionTracker) *tra
 type trackedConnection struct {
 	tcp.WriteCloser
 
-	tracker *connectionTracker
+	tracker     *connectionTracker
+	fingerprint *tcp.Fingerprint
+}
+
+func (t *trackedConnection) Fingerprint() *tcp.Fingerprint {
+	return t.fingerprint
 }
 
 func (t *trackedConnection) Close() error {
@@ -856,6 +921,38 @@ func populateRequestTLS(h http.Handler) http.Handler {
 			if tlsConn, ok := req.Context().Value(tlsConnKey{}).(*tls.Conn); ok {
 				state := tlsConn.ConnectionState()
 				req.TLS = &state
+			}
+		}
+
+		h.ServeHTTP(rw, req)
+	})
+}
+
+const (
+	xTCPFingerprint = "X-TCP-Fingerprint"
+	xTCPTTL         = "X-TCP-TTL"
+	xJA4            = "X-TLS-JA4"
+)
+
+type fingerprintKey struct{}
+
+func fingerprintHeaders(h http.Handler, config *static.Fingerprint) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		fingerprint, _ := req.Context().Value(fingerprintKey{}).(*tcp.Fingerprint)
+
+		if config.TCP {
+			req.Header.Del(xTCPFingerprint)
+			req.Header.Del(xTCPTTL)
+			if fingerprint != nil && fingerprint.TCP != "" {
+				req.Header.Set(xTCPFingerprint, fingerprint.TCP)
+				req.Header.Set(xTCPTTL, fingerprint.TTL)
+			}
+		}
+
+		if config.TLS {
+			req.Header.Del(xJA4)
+			if fingerprint != nil && fingerprint.JA4 != "" {
+				req.Header.Set(xJA4, fingerprint.JA4)
 			}
 		}
 

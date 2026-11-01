@@ -372,6 +372,13 @@ func newPeekConn(conn tcp.WriteCloser) *peekConn {
 	}
 }
 
+func (c *peekConn) Fingerprint() *tcp.Fingerprint {
+	if conn, ok := c.WriteCloser.(tcp.FingerprintConn); ok {
+		return conn.Fingerprint()
+	}
+	return nil
+}
+
 // Peek allows peeking into the connection without consuming bytes, by using the bufio.Reader's Peek method.
 func (c *peekConn) Peek(n int) ([]byte, error) {
 	return c.reader.Peek(n)
@@ -439,6 +446,9 @@ func clientHelloInfo(conn *peekConn) (*clientHello, error) {
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			sni = hello.ServerName
 			protos = hello.SupportedProtos
+			if fingerprint := conn.Fingerprint(); fingerprint != nil {
+				fingerprint.SetClientHello(hello)
+			}
 			// This error prevents unnecessary additional steps in the TLS ClientHello message processing.
 			return nil, errClientHelloRead
 		},
