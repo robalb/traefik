@@ -56,7 +56,7 @@ func (f *Fingerprint) SetSYN(syn []byte) {
 		return
 	}
 
-	// parse TCP 
+	// parse TCP
 	window := binary.BigEndian.Uint16(header[14:16])
 	options := header[20:dataOffset]
 
@@ -97,7 +97,7 @@ func (f *Fingerprint) SetSYN(syn []byte) {
 
 	// P0f TCP-fingerprint, with url-safe separators
 	// 1460_64240_7_2-4-8-1-3
-	//  |     |   \ ---.----- 
+	//  |     |   \ ---.-----
 	// mss  window \    \
 	//            scale  options
 	//
