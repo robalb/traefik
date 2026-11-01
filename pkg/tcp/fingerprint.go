@@ -12,9 +12,10 @@ import (
 )
 
 type Fingerprint struct {
-	TCP string
-	TTL string
-	JA4 string
+	TCP   string
+	TTL   string
+	JA4   string
+	TLSFP string
 }
 
 type FingerprintConn interface {
@@ -120,19 +121,39 @@ func (f *Fingerprint) SetClientHello(hello *tls.ClientHelloInfo) {
 		sni = "d"
 	}
 
-	prefix := fmt.Sprintf("t%s%s%02d%02d%s", ja4Version(hello.SupportedVersions), sni, min(len(ciphers), 99), min(len(extensions), 99), ja4ALPN(hello.SupportedProtos))
+	head := fmt.Sprintf("t%s%s%02d", ja4Version(hello.SupportedVersions), sni, min(len(ciphers), 99))
+	alpn := ja4ALPN(hello.SupportedProtos)
+	extensionCount := len(extensions)
 
 	slices.Sort(ciphers)
+	cipherHash := ja4Hash(hexList(ciphers))
 
 	extensions = slices.DeleteFunc(extensions, func(e uint16) bool { return e == 0x0000 || e == 0x0010 })
 	slices.Sort(extensions)
 
-	exts := hexList(extensions)
+	var sigs string
 	if signatures := withoutGREASE(hello.SignatureSchemes); len(signatures) > 0 {
-		exts += "_" + hexList(signatures)
+		sigs = "_" + hexList(signatures)
 	}
 
-	f.JA4 = prefix + "_" + ja4Hash(hexList(ciphers)) + "_" + ja4Hash(exts)
+	f.JA4 = fmt.Sprintf("%s%02d%s_%s_%s", head, min(extensionCount, 99), alpn, cipherHash, ja4Hash(hexList(extensions)+sigs))
+
+	stable := slices.DeleteFunc(extensions, isEphemeral)
+	extensionCount -= len(extensions) - len(stable)
+
+	groups := withoutGREASE(hello.SupportedCurves)
+	slices.Sort(groups)
+
+	f.TLSFP = fmt.Sprintf("%s%02d%s_%s_%s_%s", head, min(extensionCount, 99), alpn, cipherHash, ja4Hash(hexList(stable)+sigs), ja4Hash(hexList(groups)))
+}
+
+func isEphemeral(extension uint16) bool {
+	switch extension {
+	case 0x0015, 0x0023, 0x0029, 0x002a, 0x002c, 0x002d:
+		return true
+	default:
+		return false
+	}
 }
 
 func isGREASE(v uint16) bool {
