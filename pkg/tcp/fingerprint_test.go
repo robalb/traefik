@@ -41,6 +41,6 @@ func TestFingerprint_SetSYN(t *testing.T) {
 	var fingerprint Fingerprint
 	fingerprint.SetSYN(syn)
 
-	assert.Equal(t, "64240_2-4-8-1-3_1460_7", fingerprint.TCP)
+	assert.Equal(t, "1460_64240_7_2-4-8-1-3", fingerprint.TCP)
 	assert.Equal(t, "64", fingerprint.TTL)
 }

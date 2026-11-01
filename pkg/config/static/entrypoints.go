@@ -203,7 +203,10 @@ type ProxyProtocol struct {
 // Fingerprint contains client connection Fingerprint configuration.
 type Fingerprint struct {
 	TCP bool `description:"Forwards the TCP SYN fingerprint of the client connections." json:"tcp,omitempty" toml:"tcp,omitempty" yaml:"tcp,omitempty" export:"true"`
-	TLS bool `description:"Forwards the TLS handshake fingerprint of the client connections." json:"tls,omitempty" toml:"tls,omitempty" yaml:"tls,omitempty" export:"true"`
+}
+
+func (f *Fingerprint) SetDefaults() {
+	f.TCP = true
 }
 
 // EntryPoints holds the HTTP entry point list.
