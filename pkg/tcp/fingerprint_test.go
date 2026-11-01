@@ -1,34 +1,18 @@
 package tcp
 
 import (
+	"bytes"
 	"crypto/tls"
+	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestFingerprint_SetClientHello(t *testing.T) {
-	hello := &tls.ClientHelloInfo{
-		CipherSuites: []uint16{
-			0x8a8a, 0x1301, 0x1302, 0x1303, 0xc02b, 0xc02f, 0xc02c, 0xc030,
-			0xcca9, 0xcca8, 0xc013, 0xc014, 0x009c, 0x009d, 0x002f, 0x0035,
-		},
-		Extensions: []uint16{
-			0x2a2a, 0x0012, 0x0000, 0x0023, 0x001b, 0x4469, 0x000b, 0x002b, 0x0010,
-			0x000d, 0x0005, 0xff01, 0x0033, 0x002d, 0x0017, 0x000a, 0x0015, 0x3a3a,
-		},
-		SignatureSchemes:  []tls.SignatureScheme{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601},
-		SupportedProtos:   []string{"h2", "http/1.1"},
-		SupportedVersions: []uint16{0x7a7a, tls.VersionTLS13, tls.VersionTLS12},
-		SupportedCurves:   []tls.CurveID{0x4a4a, 0x001d, 0x0017, 0x001e, 0x0019, 0x0018},
-	}
-
-	var fingerprint Fingerprint
-	fingerprint.SetClientHello(hello)
-
-	assert.Equal(t, "t13d1516h2_8daaf6152771_e5627efa2ab1", fingerprint.JA4)
-	assert.Equal(t, "t13d1513h2_8daaf6152771_8b8af37844ec_0a47a2b05960", fingerprint.TLSFP)
-}
 
 func TestFingerprint_SetSYN(t *testing.T) {
 	syn := []byte{
@@ -45,4 +29,72 @@ func TestFingerprint_SetSYN(t *testing.T) {
 
 	assert.Equal(t, "1460_64240_7_2-4-8-1-3", fingerprint.TCP)
 	assert.Equal(t, "64", fingerprint.TTL)
+}
+
+func TestFingerprint_SetClientHelloCaptures(t *testing.T) {
+	testCases := []struct {
+		desc  string
+		file  string
+		ja4   string
+		tlsfp string
+	}{
+		{
+			desc:  "TLS 1.2 without ALPN",
+			file:  "tls12-no-alpn.bin",
+			ja4:   "t12d190800_d83cc789557e_7af1ed941c26",
+			tlsfp: "t12d190700_d83cc789557e_e8ab298402c8_30e06788707b",
+		},
+		{
+			desc:  "Chrome",
+			file:  "chrome.bin",
+			ja4:   "t13d1516h2_8daaf6152771_e5627efa2ab1",
+			tlsfp: "t13d1513h2_8daaf6152771_8b8af37844ec_30e06788707b",
+		},
+		{
+			desc:  "Chrome resumed",
+			file:  "chrome-resumed.bin",
+			ja4:   "t13d1516h2_8daaf6152771_9b887d9acb53",
+			tlsfp: "t13d1513h2_8daaf6152771_8b8af37844ec_30e06788707b",
+		},
+		{
+			desc:  "Firefox",
+			file:  "firefox.bin",
+			ja4:   "t13d1715h2_5b57614c22b0_3d5424432f57",
+			tlsfp: "t13d1712h2_5b57614c22b0_40c704383e9d_64e4e22bfa81",
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			hello, err := os.ReadFile(filepath.Join("testdata", "clienthello", test.file))
+			require.NoError(t, err)
+
+			var fingerprint Fingerprint
+			server := tls.Server(helloConn{Reader: bytes.NewReader(hello)}, &tls.Config{
+				GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
+					fingerprint.SetClientHello(info)
+					return nil, errors.New("client hello read")
+				},
+			})
+			require.Error(t, server.Handshake())
+
+			assert.Equal(t, test.ja4, fingerprint.JA4)
+			assert.Equal(t, test.tlsfp, fingerprint.TLSFP)
+		})
+	}
+}
+
+type helloConn struct {
+	net.Conn
+	io.Reader
+}
+
+func (c helloConn) Read(p []byte) (int, error) {
+	return c.Reader.Read(p)
+}
+
+func (c helloConn) Write(p []byte) (int, error) {
+	return len(p), nil
 }
