@@ -26,6 +26,7 @@ func (f *Fingerprint) SetSYN(syn []byte) {
 		return
 	}
 
+	// parse IP
 	var ttl uint8
 	var header []byte
 	switch syn[0] >> 4 {
@@ -54,15 +55,20 @@ func (f *Fingerprint) SetSYN(syn []byte) {
 		return
 	}
 
+	// parse TCP 
 	window := binary.BigEndian.Uint16(header[14:16])
 	options := header[20:dataOffset]
 
-	var kinds []string
+	var kindsBuf [64]byte
+	kinds := kindsBuf[:0]
 	var mss uint16
 	var wscale uint8
 	for i := 0; i < len(options); {
 		kind := options[i]
-		kinds = append(kinds, strconv.Itoa(int(kind)))
+		if len(kinds) > 0 {
+			kinds = append(kinds, '-')
+		}
+		kinds = strconv.AppendUint(kinds, uint64(kind), 10)
 		if kind == 0 {
 			break
 		}
@@ -87,7 +93,22 @@ func (f *Fingerprint) SetSYN(syn []byte) {
 	}
 
 	f.TTL = strconv.Itoa(int(ttl))
-	f.TCP = fmt.Sprintf("%d_%s_%d_%d", window, strings.Join(kinds, "-"), mss, wscale)
+
+	// P0f TCP-fingerprint, with url-safe separators
+	// 1460_64240_7_2-4-8-1-3
+	//  |     |   \ ---.----- 
+	// mss  window \    \
+	//            scale  options
+	//
+	var buf [96]byte
+	b := strconv.AppendUint(buf[:0], uint64(mss), 10)
+	b = append(b, '_')
+	b = strconv.AppendUint(b, uint64(window), 10)
+	b = append(b, '_')
+	b = strconv.AppendUint(b, uint64(wscale), 10)
+	b = append(b, '_')
+	b = append(b, kinds...)
+	f.TCP = string(b)
 }
 
 func (f *Fingerprint) SetClientHello(hello *tls.ClientHelloInfo) {

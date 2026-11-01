@@ -450,21 +450,19 @@ func writeCloser(conn net.Conn) (tcp.WriteCloser, error) {
 }
 
 func readSavedSYN(conn net.Conn) ([]byte, error) {
-	switch typedConn := conn.(type) {
-	case *proxyproto.Conn:
-		if typedConn.ProxyHeader() != nil {
+	if proxyConn, ok := conn.(*proxyproto.Conn); ok {
+		if proxyConn.ProxyHeader() != nil {
 			return nil, nil
 		}
-		underlying, ok := typedConn.TCPConn()
-		if !ok {
-			return nil, errors.New("underlying connection is not a tcp connection")
-		}
-		return savedSYN(underlying)
-	case *net.TCPConn:
-		return savedSYN(typedConn)
-	default:
-		return nil, fmt.Errorf("unknown connection type %T", typedConn)
+		conn = proxyConn.Raw()
 	}
+
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return nil, fmt.Errorf("unknown connection type %T", conn)
+	}
+
+	return savedSYN(tcpConn)
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -929,9 +927,9 @@ func populateRequestTLS(h http.Handler) http.Handler {
 }
 
 const (
-	xTCPFingerprint = "X-TCP-Fingerprint"
-	xTCPTTL         = "X-TCP-TTL"
-	xJA4            = "X-TLS-JA4"
+	xTCPFingerprint = "X-Tcp-Fingerprint"
+	xTCPTTL         = "X-Tcp-Ttl"
+	xJA4            = "X-Tls-Ja4"
 )
 
 type fingerprintKey struct{}
@@ -949,11 +947,9 @@ func fingerprintHeaders(h http.Handler, config *static.Fingerprint) http.Handler
 			}
 		}
 
-		if config.TLS {
-			req.Header.Del(xJA4)
-			if fingerprint != nil && fingerprint.JA4 != "" {
-				req.Header.Set(xJA4, fingerprint.JA4)
-			}
+		req.Header.Del(xJA4)
+		if fingerprint != nil && fingerprint.JA4 != "" {
+			req.Header.Set(xJA4, fingerprint.JA4)
 		}
 
 		h.ServeHTTP(rw, req)
