@@ -938,10 +938,10 @@ func populateRequestTLS(h http.Handler) http.Handler {
 }
 
 const (
-	xTCPFingerprint = "X-Tcp-Fingerprint"
-	xTCPTTL         = "X-Tcp-Ttl"
-	xJA4            = "X-Tls-Ja4"
-	xTLSFP          = "X-Tls-Tlsfp"
+	xTCPFingerprint = "X-Fingerprint-Tcp"
+	xTCPTTL         = "X-Fingerprint-Tcp-Ttl"
+	xJA4            = "X-Fingerprint-Tls-Ja4"
+	xTLSFP          = "X-Fingerprint-Tls-Tlsfp"
 )
 
 type fingerprintKey struct{}
