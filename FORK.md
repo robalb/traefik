@@ -80,5 +80,5 @@ entryPoints:
 ```
 
 - Use `fingerprint: {tcp: false}` to keep only the TLS fingerprints.
-- Backends receive `X-Tcp-Fingerprint` and `X-Tcp-Ttl` (from the client's TCP SYN, Linux only), and `X-Tls-Ja4` and `X-Tls-Tlsfp` (from the TLS ClientHello). Values sent by clients are removed.
+- Backends receive `X-Fingerprint-Tcp` and `X-Fingerprint-Tcp-Ttl` (from the client's TCP SYN, Linux only), and `X-Fingerprint-Tls-Ja4` and `X-Fingerprint-Tls-Tlsfp` (from the TLS ClientHello). Values sent by clients are removed.
 - Ports published through the Docker bridge decrement the TTL, and Docker's userland proxy replaces the client SYN. Use `network_mode: host` when the TCP fingerprint must reflect real clients.
